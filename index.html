@@ -5,80 +5,198 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#101827">
 <title>قیمت بیت‌کوین</title>
+
 <style>
-body{margin:0;background:#101827;color:white;font-family:Arial,sans-serif;padding:20px}
+*{box-sizing:border-box}
+body{
+  margin:0;background:#101827;color:white;
+  font-family:Arial,sans-serif;padding:20px
+}
 main{max-width:520px;margin:auto}
 h1{text-align:center;color:#f5a623}
-.box{background:#1e293b;border-radius:15px;padding:18px;margin:14px 0}
-.price{font-size:32px;font-weight:bold;text-align:center;color:#f5a623}
-.row{display:flex;justify-content:space-between;gap:10px;padding:13px 0;border-bottom:1px solid #39465a}
-button{width:100%;padding:14px;border:0;border-radius:10px;background:#f5a623;font-size:17px;font-weight:bold}
+.box{
+  background:#1e293b;border-radius:15px;
+  padding:18px;margin:14px 0
+}
+.price{
+  font-size:32px;font-weight:bold;
+  text-align:center;color:#f5a623;overflow-wrap:anywhere
+}
+.row{
+  display:flex;justify-content:space-between;
+  gap:10px;padding:13px 0;
+  border-bottom:1px solid #39465a
+}
+.row span:last-child{text-align:left;direction:ltr}
+button{
+  width:100%;padding:14px;border:0;
+  border-radius:10px;background:#f5a623;
+  font-size:17px;font-weight:bold;cursor:pointer
+}
 .small{text-align:center;color:#b8c2d3;font-size:13px}
+.status{margin-top:10px;line-height:1.8}
 </style>
 </head>
+
 <body>
 <main>
 <h1>₿ قیمت بیت‌کوین</h1>
+
 <div class="box">
-<div class="small">قیمت فعلی به دالر آمریکا</div>
-<div id="current" class="price">در حال بارگذاری...</div>
-<div id="updated" class="small"></div>
+  <div class="small">قیمت فعلی به دالر آمریکا</div>
+  <div id="current" class="price">در حال دریافت...</div>
+  <div id="updated" class="small"></div>
 </div>
+
 <div class="box">
-<h3>مقایسه با گذشته</h3>
-<div id="history">در حال دریافت قیمت‌ها...</div>
+  <h3>مقایسه با گذشته</h3>
+  <div id="history">در حال دریافت قیمت‌های گذشته...</div>
 </div>
-<button onclick="loadPrices()">تازه‌سازی قیمت</button>
+
+<button id="refresh" onclick="refreshAll()">تازه‌سازی قیمت</button>
 <p class="small">این برنامه فقط قیمت را نشان می‌دهد و معامله انجام نمی‌دهد.</p>
-<p id="error" class="small"></p>
+<p id="status" class="small status"></p>
 </main>
+
 <script>
+const API='https://api.coingecko.com/api/v3';
+
 const periods=[
-["یک روز قبل",1],
-["یک هفته قبل",7],
-["یک ماه قبل",30],
-["سه ماه قبل",90],
-["یک سال قبل",365]
+  ['یک روز قبل',1],
+  ['یک هفته قبل',7],
+  ['یک ماه قبل',30],
+  ['سه ماه قبل',90],
+  ['یک سال قبل',365]
 ];
+
 const money=n=>new Intl.NumberFormat('en-US',{
-style:'currency',currency:'USD',maximumFractionDigits:2
+  style:'currency',
+  currency:'USD',
+  maximumFractionDigits:2
 }).format(n);
-async function loadPrices(){
-document.getElementById('error').textContent='';
-document.getElementById('current').textContent='در حال بارگذاری...';
-document.getElementById('history').textContent='در حال دریافت قیمت‌ها...';
-try{
-const now=Date.now();
-const dates=periods.map(p=>new Date(now-p[1]*86400000));
-const requests=dates.map(d=>{
-const date=d.getUTCDate().toString().padStart(2,'0')+'-'+
-(d.getUTCMonth()+1).toString().padStart(2,'0')+'-'+d.getUTCFullYear();
-return fetch('https://api.coingecko.com/api/v3/coins/bitcoin/history?date='+date)
-.then(r=>{if(!r.ok)throw Error('خطا در دریافت قیمت');return r.json()})
-.then(j=>({label:periods[dates.indexOf(d)][0],price:j.market_data.current_price.usd}))
-});
-const currentResponse=await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
-if(!currentResponse.ok)throw Error('اتصال به منبع قیمت ناموفق بود');
-const currentData=await currentResponse.json();
-const current=currentData.bitcoin.usd;
-document.getElementById('current').textContent=money(current);
-document.getElementById('updated').textContent='آخرین بررسی: '+new Date().toLocaleString();
-const results=await Promise.all(requests);
-document.getElementById('history').innerHTML=results.map(item=>{
-const diff=current-item.price;
-const color=diff>=0?'#4ade80':'#f87171';
-const sign=diff>=0?'+':'';
-return '<div class="row"><span>'+item.label+'</span><span>'+money(item.price)+'</span></div>'+
-'<div class="small" style="text-align:left;color:'+color+'">تغییر تا امروز: '+sign+money(diff)+'</div>';
-}).join('');
-}catch(e){
-document.getElementById('current').textContent='قیمت دریافت نشد';
-document.getElementById('history').textContent='اتصال اینترنت را بررسی کن و دوباره امتحان کن.';
-document.getElementById('error').textContent='ممکن است سرویس قیمت محدودیت درخواست داشته باشد.';
+
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+
+async function getJSON(url){
+  const response=await fetch(url);
+  if(!response.ok){
+    if(response.status===429){
+      throw Error('سرویس قیمت موقتاً درخواست‌های زیادی دریافت کرده است. کمی بعد دوباره امتحان کن.');
+    }
+    throw Error('خطای دریافت اطلاعات: '+response.status);
+  }
+  return response.json();
 }
+
+async function loadCurrent(){
+  const el=document.getElementById('current');
+  const updated=document.getElementById('updated');
+
+  try{
+    const data=await getJSON(
+      API+'/simple/price?ids=bitcoin&vs_currencies=usd'
+    );
+
+    const price=data?.bitcoin?.usd;
+    if(typeof price!=='number') throw Error('قیمت در پاسخ سرویس پیدا نشد.');
+
+    el.textContent=money(price);
+    updated.textContent='آخرین بررسی: '+new Date().toLocaleString();
+    return price;
+  }catch(error){
+    if(el.textContent==='در حال دریافت...'){
+      el.textContent='قیمت فعلاً در دسترس نیست';
+    }
+    document.getElementById('status').textContent=
+      'دریافت قیمت فعلی ناموفق بود. اتصال اینترنت را بررسی کن و کمی بعد دوباره امتحان کن.';
+    return null;
+  }
 }
-loadPrices();
-setInterval(loadPrices,60000);
+
+async function loadHistory(current){
+  const container=document.getElementById('history');
+  container.innerHTML='در حال دریافت قیمت‌های گذشته...';
+
+  const rows=[];
+
+  for(let i=0;i<periods.length;i++){
+    const [label,days]=periods[i];
+    const date=new Date(Date.now()-days*86400000);
+    const dateText=
+      String(date.getUTCDate()).padStart(2,'0')+'-'+
+      String(date.getUTCMonth()+1).padStart(2,'0')+'-'+
+      date.getUTCFullYear();
+
+    try{
+      const data=await getJSON(
+        API+'/coins/bitcoin/history?date='+dateText+'&localization=false'
+      );
+
+      const price=data?.market_data?.current_price?.usd;
+      if(typeof price!=='number') throw Error('قیمت تاریخی موجود نیست.');
+
+      const diff=current-price;
+      const color=diff>=0?'#4ade80':'#f87171';
+      const sign=diff>=0?'+':'';
+
+      rows.push(
+        '<div class="row"><span>'+label+'</span><span>'+money(price)+'</span></div>'+
+        '<div class="small" style="text-align:left;color:'+color+'">'+
+        'تغییر تا امروز: '+sign+money(diff)+'</div>'
+      );
+    }catch(error){
+      rows.push(
+        '<div class="row"><span>'+label+'</span>'+
+        '<span style="color:#fbbf24">فعلاً دریافت نشد</span></div>'
+      );
+    }
+
+    container.innerHTML=rows.join('');
+
+    // فاصله میان درخواست‌ها برای کاهش احتمال محدودیت سرویس
+    if(i<periods.length-1) await sleep(1500);
+  }
+
+  document.getElementById('status').textContent=
+    'بررسی قیمت‌های گذشته تمام شد. اگر موردی دریافت نشد، کمی بعد دوباره امتحان کن.';
+}
+
+let busy=false;
+
+async function refreshAll(){
+  if(busy) return;
+  busy=true;
+
+  const button=document.getElementById('refresh');
+  const status=document.getElementById('status');
+
+  button.disabled=true;
+  button.textContent='در حال بررسی...';
+  status.textContent='در حال دریافت اطلاعات...';
+
+  try{
+    const current=await loadCurrent();
+
+    if(current!==null){
+      await loadHistory(current);
+    }else{
+      document.getElementById('history').textContent=
+        'قیمت فعلی دریافت نشد؛ لطفاً کمی بعد دوباره امتحان کن.';
+    }
+  }finally{
+    busy=false;
+    button.disabled=false;
+    button.textContent='تازه‌سازی قیمت';
+  }
+}
+
+refreshAll();
+
+// فقط قیمت فعلی هر ۶۰ ثانیه بررسی می‌شود؛
+// برای دریافت دوباره قیمت‌های گذشته، دکمه را بزن.
+setInterval(()=>{
+  if(!busy) loadCurrent();
+},60000);
 </script>
 </body>
 </html>
